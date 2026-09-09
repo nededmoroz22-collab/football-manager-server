@@ -1,10 +1,28 @@
 import time
 import random
+import threading
+import os
 import firebase_admin
 from firebase_admin import credentials, db
+from flask import Flask
 
-# 🌐 Подключение к твоему Firebase
-# Файл serviceAccountKey.json должен лежать в этой же папке!
+# 🔌 1. Создаем микро-сайт "для галочки", чтобы обмануть сканер портов Render
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Футбольный MMO-сервер работает!", 200
+
+def run_flask():
+    # Render сам выдает номер порта в переменную окружения PORT, берем его или ставим 10000
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# Запускаем веб-заглушку в отдельном фоновом потоке
+threading.Thread(target=run_flask, daemon=True).start()
+
+
+# 🌐 2. Подключение к твоему Firebase
 cred = credentials.Certificate("serviceAccountKey.json")
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app'
@@ -12,19 +30,11 @@ firebase_admin.initialize_app(cred, {
 
 print("🚀 Футбольный MMO-сервер успешно запущен и слушает Firebase...")
 
-# Вспомогательная функция обновления турнирной таблицы
 def update_league_table(league_name, team_name, gs, gc, pts):
     clean_name = team_name.strip().replace(".", "")
     ref = db.reference(f'leagues_data/{league_name}/table/{clean_name}')
-    
     snapshot = ref.get()
-    played = 0
-    points = 0
-    goals_s = 0
-    goals_c = 0
-    wins = 0
-    draws = 0
-    losses = 0
+    played = points = goals_s = goals_c = wins = draws = losses = 0
     
     if snapshot:
         played = snapshot.get('played', 0)
@@ -37,7 +47,7 @@ def update_league_table(league_name, team_name, gs, gc, pts):
         
     played += 1
     points += pts
-    goals_s += gc
+    goals_s += gs
     goals_c += gc
     
     if gs > gc: wins += 1
@@ -45,26 +55,17 @@ def update_league_table(league_name, team_name, gs, gc, pts):
     else: losses += 1
     
     ref.update({
-        "clubName": team_name.strip(),
-        "played": played,
-        "points": points,
-        "gs": goals_s,
-        "gc": goals_c,
-        "wins": wins,
-        "draws": draws,
-        "losses": losses
+        "clubName": team_name.strip(), "played": played, "points": points,
+        "gs": goals_s, "gc": goals_c, "wins": wins, "draws": draws, "losses": losses
     })
 
-# Функция симуляции тура (теперь считает сервер!)
 def simulate_mmo_tour(league_name, current_tour):
     print(f"🏟️ Начинаю серверный расчет {current_tour} тура для лиги {league_name}...")
-    
-    # Считываем тактики, которые отправили игроки
     lineups_ref = db.reference(f'leagues_data/{league_name}/lineups/tour_{current_tour}')
     teams_data = lineups_ref.get()
     
     if not teams_data:
-        print("❌ Ошибка: На этот тур никто не отправил составы.")
+        print("❌ Ошибка: Составы не найдены.")
         return
         
     all_teams = list(teams_data.keys())
@@ -85,19 +86,15 @@ def simulate_mmo_tour(league_name, current_tour):
             busy_teams.add(team_a)
             busy_teams.add(team_b)
             
-            # Получаем рейтинги OVR атак и защит, отправленные из тактик
             ovr_a = teams_data[team_a].get('attackOvr', 75)
             def_b = teams_data[team_b].get('defenseOvr', 75)
             ovr_b = teams_data[team_b].get('attackOvr', 75)
             def_a = teams_data[team_a].get('defenseOvr', 75)
             
-            score_a = 0
-            score_b = 0
-            
-            # ИСПРАВЛЕНО: Чистый расчет 90 минут матча фаворитов и аутсайдеров
+            score_a = score_b = 0
             for _ in range(90):
-                if random.randint(0, 100) < 23: # Шанс активности на минуте
-                    is_home_action = random.choice([True, False]) # Кто атакует
+                if random.randint(0, 100) < 23:
+                    is_home_action = random.choice([True, False])
                     if is_home_action:
                         prob = max(12, min(35, 18 + (ovr_a - def_b)))
                         if random.randint(0, 100) < prob: score_a += 1
@@ -108,23 +105,18 @@ def simulate_mmo_tour(league_name, current_tour):
             pts_a = 3 if score_a > score_b else (1 if score_a == score_b else 0)
             pts_b = 3 if score_b > score_a else (1 if score_a == score_b else 0)
             
-            # Обновляем турнирные таблицы
             update_league_table(league_name, team_a, score_a, score_b, pts_a)
             update_league_table(league_name, team_b, score_b, score_a, pts_b)
             
-            # Записываем счет матча в результаты тура
             fixtures_ref.push().set({
-                "homeTeam": team_a,
-                "awayTeam": team_b,
-                "homeScore": score_a,
-                "awayScore": score_b,
+                "homeTeam": team_a, "awayTeam": team_b,
+                "homeScore": score_a, "awayScore": score_b,
                 "homeScorers": f"Игрок А. {score_a} гол(ов)" if score_a > 0 else "Нет голов",
                 "awayScorers": f"Игрок Б. {score_b} гол(ов)" if score_b > 0 else "Нет голов"
             })
-            
     print(f"✅ Расчет {current_tour} тура успешно завершен!")
 
-# 🔄 Вечный цикл прослушивания триггера запуска
+# 🔄 Вечный цикл прослушивания Firebase
 while True:
     try:
         trigger_ref = db.reference('sys_trigger')
@@ -134,13 +126,10 @@ while True:
             league = trigger_data.get('leagueName', 'La Liga')
             tour = trigger_data.get('tourNumber', 1)
             
-            # Запускаем симуляцию
             simulate_mmo_tour(league, tour)
-            
-            # Переводим статус триггера, чтобы телефон понял, что всё готово
             trigger_ref.update({'status': 'FINISHED'})
             
     except Exception as e:
-        print(f"Ошибка в цикле сервера: {e}")
+        print(f"Ошибка: {e}")
         
-    time.sleep(2) # Пауза раз в 2 секунды, чтобы не перегружать ОЗУ
+    time.sleep(2)
