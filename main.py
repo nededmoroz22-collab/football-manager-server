@@ -7,7 +7,7 @@ from firebase_admin import credentials, db
 # Скачай файл закрытого ключа из консоли Firebase (Инструкция ниже) и положи в папку под именем serviceAccountKey.json
 cred = credentials.Certificate("serviceAccountKey.json")
 firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://firebasedatabase.app'
+    'databaseURL': 'https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app'
 })
 
 print("🚀 Футбольный MMO-сервер успешно запущен на Amvera и слушает Firebase...")
