@@ -1,15 +1,13 @@
 import os
 import random
-import time
-import threading
 import requests
-from flask import Flask
+from flask import Flask, request
 
 # 🔐 Токен авторизации, скопированный из Database Secrets в Firebase
 DATABASE_SECRET = "xgEDutCHwe6LmCCoLDzKxjGQ05JZOJvUCmvqgvZa"
 FIREBASE_URL = "https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app"
 
-print("🚀 Запуск всеядного MMO-сервера по токену...")
+print("🚀 Инициализация веб-сервера прямого действия...")
 
 app = Flask(__name__)
 
@@ -48,7 +46,7 @@ def update_league_table(league_name, team_name, gs, gc, pts):
     requests.patch(url, json=data)
 
 def simulate_mmo_tour(league_name, current_tour, clubs_list):
-    print(f"🏟️ Начинаю серверный расчет {current_tour} тура для лиги {league_name}...")
+    print(f"🏟️ СЕРВЕР: Начинаю расчет {current_tour} тура для лиги {league_name}...")
     lineups_url = f"{FIREBASE_URL}/leagues_data/{league_name}/lineups/tour_{current_tour}.json?auth={DATABASE_SECRET}"
     user_lineups = requests.get(lineups_url).json() or {}
     
@@ -121,39 +119,40 @@ def simulate_mmo_tour(league_name, current_tour, clubs_list):
         match_data = {
             "homeTeam": home, "awayTeam": away,
             "homeScore": score_a, "awayScore": score_b,
-            "homeScorers": f"Игрок А. {score_a} гол(ов)" if score_a > 0 else "Нет голов",
+            "homeScorers": f"Игрок А. {score_a} гол(ов)" if score_a > 0 else "Нет黄金голов",
             "awayScorers": f"Игрок Б. {score_b} гол(ов)" if score_b > 0 else "Нет голов"
         }
         requests.post(fixtures_url, json=match_data)
     print(f"✅ Расчет {current_tour} тура успешно завершен!")
 
 
-# 🔄 🔥 НОВЫЙ БЕЗОПАСНЫЙ ПОТОК: Каждые 3 секунды самостоятельно проверяет базу данных Firebase
-def background_firebase_polling():
-    trigger_url = f"{FIREBASE_URL}/sys_trigger.json?auth={DATABASE_SECRET}"
-    while True:
-        try:
-            response = requests.get(trigger_url)
-            if response.status_code == 200:
-                trigger_data = response.json()
-                if trigger_data and trigger_data.get('status') == 'REQUESTED':
-                    league = trigger_data.get('leagueName', 'La Liga')
-                    tour = trigger_data.get('tourNumber', 1)
-                    clubs_list = trigger_data.get('clubsList', [])
-                    
-                    simulate_mmo_tour(league, tour, clubs_list)
-                    requests.patch(trigger_url, json={'status': 'FINISHED'})
-        except Exception as e:
-            pass
-        time.sleep(3)
-
-# Запускаем фоновый таймер опроса при старте сервера
-threading.Thread(target=background_firebase_polling, daemon=True).start()
-
-
+# 🔥 ИСПРАВЛЕНО: Главная точка входа. Когда телефон делает интернет-запрос сюда, 
+# сервер моментально и безусловно берет параметры триггера и рассчитывает матч!
 @app.route('/', methods=['GET', 'HEAD'])
 def home_ping_check():
-    return "Футбольный MMO-сервер активен и слушает порты!", 200
+    trigger_url = f"{FIREBASE_URL}/sys_trigger.json?auth={DATABASE_SECRET}"
+    try:
+        response = requests.get(trigger_url)
+        if response.status_code == 200:
+            trigger_data = response.json()
+            
+            # Сервер проверяет статус прямо внутри входящего веб-запроса от OkHttp!
+            if trigger_data and trigger_data.get('status') == 'REQUESTED':
+                league = trigger_data.get('leagueName', 'La Liga')
+                tour = trigger_data.get('tourNumber', 1)
+                clubs_list = trigger_data.get('clubsList', [])
+                
+                # Запускаем симуляцию прямо в этом потоке
+                simulate_mmo_tour(league, tour, clubs_list)
+                
+                # Принудительно гасим триггер в FINISHED
+                requests.patch(trigger_url, json={'status': 'FINISHED'})
+                return "✅ Тур успешно посчитан облаком!", 200
+                
+    except Exception as e:
+        print(f"Ошибка внутри веб-обработчика: {e}")
+        
+    return "Футбольный MMO-сервер активен и готов к расчету туров!", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
