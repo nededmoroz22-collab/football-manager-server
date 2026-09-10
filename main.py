@@ -1,34 +1,26 @@
 import time
 import random
-import firebase_admin
-from firebase_admin import credentials, db
+import requests
 
 # 🔐 Токен авторизации, скопированный из Database Secrets в Firebase
 DATABASE_SECRET = "xgEDutCHwe6LmCCoLDzKxjGQ05JZOJvUCmvqgvZa"
-DB_URL = "https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app"
+FIREBASE_URL = "https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app"
 
-if not firebase_admin._apps:
-    try:
-        cred = credentials.Certificate({
-            "private_key": DATABASE_SECRET,
-            "client_email": "admin@://gserviceaccount.com"
-        })
-        firebase_admin.initialize_app(cred, {'databaseURL': DB_URL})
-    except Exception:
-        firebase_admin.initialize_app(None, {
-            'databaseURL': DB_URL,
-            'options': {'databaseAuthVariableOverride': {'uid': 'admin'}}
-        })
-
-print("🚀 Автономный MMO-сервер успешно запущен через живой поток Firebase Stream...")
+print("🚀 Автономный REST-сервер успешно запущен и слушает Firebase напрямую...")
 
 def update_league_table(league_name, team_name, gs, gc, pts):
     clean_name = team_name.strip().replace(".", "").replace("#", "").replace("$", "")
-    ref = db.reference(f'leagues_data/{league_name}/table/{clean_name}')
-    snapshot = ref.get()
-    played = points = goals_s = goals_c = wins = draws = losses = 0
+    url = f"{FIREBASE_URL}/leagues_data/{league_name}/table/{clean_name}.json?auth={DATABASE_SECRET}"
     
-    if snapshot:
+    # Считываем текущие показатели
+    try:
+        response = requests.get(url)
+        snapshot = response.json() if response.status_code == 200 else None
+    except Exception:
+        snapshot = None
+
+    played = points = goals_s = goals_c = wins = draws = losses = 0
+    if snapshot and isinstance(snapshot, dict):
         played = snapshot.get('played', 0)
         points = snapshot.get('points', 0)
         goals_s = snapshot.get('gs', 0)
@@ -46,22 +38,23 @@ def update_league_table(league_name, team_name, gs, gc, pts):
     elif gs == gc: draws += 1
     else: losses += 1
     
-    ref.update({
+    data = {
         "clubName": team_name.strip(), "played": played, "points": points,
         "gs": goals_s, "gc": goals_c, "wins": wins, "draws": draws, "losses": losses
-    })
+    }
+    requests.patch(url, json=data)
 
 def simulate_mmo_tour(league_name, current_tour, clubs_list):
     print(f"🏟️ Начинаю серверный расчет {current_tour} тура для лиги {league_name}...")
     
-    lineups_ref = db.reference(f'leagues_data/{league_name}/lineups/tour_{current_tour}')
-    user_lineups = lineups_ref.get() or {}
+    # Скачиваем тактики
+    lineups_url = f"{FIREBASE_URL}/leagues_data/{league_name}/lineups/tour_{current_tour}.json?auth={DATABASE_SECRET}"
+    user_lineups = requests.get(lineups_url).json() or {}
     
     all_teams = list(clubs_list) if clubs_list else []
-    
     if not all_teams:
-        table_ref = db.reference(f'leagues_data/{league_name}/table')
-        table_data = table_ref.get() or {}
+        table_url = f"{FIREBASE_URL}/leagues_data/{league_name}/table.json?auth={DATABASE_SECRET}"
+        table_data = requests.get(table_url).json() or {}
         all_teams = list(table_data.keys())
 
     if not all_teams:
@@ -82,7 +75,7 @@ def simulate_mmo_tour(league_name, current_tour, clubs_list):
     rotated = moving[-offset:] + moving[:-offset] if offset > 0 else moving
     round_teams = [fixed] + rotated
 
-    fixtures_ref = db.reference(f'leagues_data/{league_name}/fixtures/tour_{current_tour}')
+    fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{current_tour}.json?auth={DATABASE_SECRET}"
 
     for i in range(teams_count // 2):
         is_second_round = tour_index >= (teams_count - 1)
@@ -91,25 +84,26 @@ def simulate_mmo_tour(league_name, current_tour, clubs_list):
 
         clean_home = home.lower().replace(".", "").replace(" ", "")
         
-        current_fixtures = fixtures_ref.get() or {}
+        current_fixtures = requests.get(fixtures_url).json() or {}
         already_played = False
-        if current_fixtures:
+        if current_fixtures and isinstance(current_fixtures, dict):
             for f_val in current_fixtures.values():
-                f_home = str(f_val.get('homeTeam', '')).lower().replace(".", "").replace(" ", "")
-                if f_home == clean_home:
-                    already_played = True
-                    break
+                if isinstance(f_val, dict):
+                    f_home = str(f_val.get('homeTeam', '')).lower().replace(".", "").replace(" ", "")
+                    if f_home == clean_home:
+                        already_played = True
+                        break
         
         if already_played or home == "ОТДЫХ" or away == "ОТДЫХ":
             continue
 
-        home_data = user_lineups.get(home, user_lineups.get(home.replace(".", ""), {}))
-        away_data = user_lineups.get(away, user_lineups.get(away.replace(".", ""), {}))
+        home_data = user_lineups.get(home, user_lineups.get(home.replace(".", ""), {})) if isinstance(user_lineups, dict) else {}
+        away_data = user_lineups.get(away, user_lineups.get(away.replace(".", ""), {})) if isinstance(user_lineups, dict) else {}
         
-        ovr_a = home_data.get('attackOvr', random.randint(72, 84))
-        def_b = away_data.get('defenseOvr', random.randint(72, 82))
-        ovr_b = away_data.get('attackOvr', random.randint(72, 84))
-        def_a = home_data.get('defenseOvr', random.randint(72, 82))
+        ovr_a = home_data.get('attackOvr', random.randint(72, 84)) if isinstance(home_data, dict) else random.randint(72, 84)
+        def_b = away_data.get('defenseOvr', random.randint(72, 82)) if isinstance(away_data, dict) else random.randint(72, 82)
+        ovr_b = away_data.get('attackOvr', random.randint(72, 84)) if isinstance(away_data, dict) else random.randint(72, 84)
+        def_a = home_data.get('defenseOvr', random.randint(72, 82)) if isinstance(home_data, dict) else random.randint(72, 82)
         
         score_a = score_b = 0
         for _ in range(90):
@@ -127,29 +121,34 @@ def simulate_mmo_tour(league_name, current_tour, clubs_list):
         update_league_table(league_name, home, score_a, score_b, pts_a)
         update_league_table(league_name, away, score_b, score_a, pts_b)
         
-        fixtures_ref.push().set({
+        match_data = {
             "homeTeam": home, "awayTeam": away,
             "homeScore": score_a, "awayScore": score_b,
             "homeScorers": f"Игрок А. {score_a} гол(ов)" if score_a > 0 else "Нет голов",
             "awayScorers": f"Игрок Б. {score_b} гол(ов)" if score_b > 0 else "Нет голов"
-        })
+        }
+        requests.post(fixtures_url, json=match_data)
         
     print(f"✅ Расчет {current_tour} тура для {league_name} успешно завершен!")
 
-# 🔄 ЖИВОЙ СЛУШАТЕЛЬ ТРИГГЕРОВ FIREBASE
-def trigger_listener(event):
-    if event.data:
-        trigger_data = db.reference('sys_trigger').get()
-        if trigger_data and trigger_data.get('status') == 'REQUESTED':
-            league = trigger_data.get('leagueName', 'La Liga')
-            tour = trigger_data.get('tourNumber', 1)
-            clubs_list = trigger_data.get('clubsList', [])
-            
-            simulate_mmo_tour(league, tour, clubs_list)
-            db.reference('sys_trigger').update({'status': 'FINISHED'})
+# 🔄 Вечный цикл регулярного опроса Firebase (REST-long polling)
+trigger_url = f"{FIREBASE_URL}/sys_trigger.json?auth={DATABASE_SECRET}"
 
-db.reference('sys_trigger').listen(trigger_listener)
-
-# Вечный удерживающий цикл, чтобы фоновый воркер Render не закрывался
 while True:
-    time.sleep(10)
+    try:
+        response = requests.get(trigger_url)
+        if response.status_code == 200:
+            trigger_data = response.json()
+            if trigger_data and trigger_data.get('status') == 'REQUESTED':
+                league = trigger_data.get('leagueName', 'La Liga')
+                tour = trigger_data.get('tourNumber', 1)
+                clubs_list = trigger_data.get('clubsList', [])
+                
+                simulate_mmo_tour(league, tour, clubs_list)
+                
+                # Переводим триггер в FINISHED
+                requests.patch(trigger_url, json={'status': 'FINISHED'})
+    except Exception as e:
+        print(f"Ошибка REST-цикла: {e}")
+        
+    time.sleep(2) # Опрос базы каждые 2 секунды
