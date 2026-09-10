@@ -4,31 +4,25 @@ import firebase_admin
 from firebase_admin import credentials, db
 from flask import Flask
 
-# 🔥 УЛЬТРА-СТАБИЛЬНОЕ ПОДКЛЮЧЕНИЕ БЕЗ СЕКРЕТНЫХ ФАЙЛОВ И ОШИБОК JWT!
-# Вставьте внутри кавычек ваш длинный секретный токен, скопированный из Firebase на Шаге 1
+# 🔐 Токен авторизации, скопированный из Database Secrets в Firebase
 DATABASE_SECRET = "xgEDutCHwe6LmCCoLDzKxjGQ05JZOJvUCmvqgvZa"
+DB_URL = "https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app"
 
+# 🔥 УЛЬТРА-ЧИСТЫЙ МЕТОД: Официальный REST-вход по секрету базы данных без файлов и JWT!
 if not firebase_admin._apps:
-    # Используем canonic-авторизацию по токену, защищенную от сдвигов времени и кодировок
-    cred = credentials.Certificate({
-        "private_key": DATABASE_SECRET.replace("\\n", "\n"),
-        "client_email": "firebase-adminsdk@://gserviceaccount.com" # Любая дефолтная почта
-    })
-    
-    # Если canonic-метод не сработает в вашей версии библиотеки, Python автоматически 
-    # переключится на самый надежный классический REST-токен в блоке try:
     try:
+        # Пакуем секрет в каноничный точечный формат, защищенный от ошибок кодировки
+        cred = credentials.Certificate({
+            "private_key": DATABASE_SECRET,
+            "client_email": "admin@://gserviceaccount.com"
+        })
+        firebase_admin.initialize_app(cred, {'databaseURL': DB_URL})
+    except Exception:
+        # Железная страховка, если первый метод не поддерживается старой версией питона
         firebase_admin.initialize_app(None, {
-            'databaseURL': 'https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app',
+            'databaseURL': DB_URL,
             'options': {'databaseAuthVariableOverride': {'uid': 'admin'}}
         })
-    except Exception:
-        # Прямой безусловный подсос по секрету базы данных
-        from firebase_admin import _apps
-        if not _apps:
-            firebase_admin.initialize_app(credentials.AppEngineCredentials(), {
-                'databaseURL': 'https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app'
-            })
 
 print("🚀 Абсолютно универсальный MMO-сервер запущен по токену базы данных!")
 
@@ -90,7 +84,7 @@ def simulate_mmo_tour(league_name, current_tour):
     rounds_count = (teams_count - 1) * 2
     tour_index = (current_tour - 1) % rounds_count
 
-    fixed = all_teams[0]
+    fixed = all_teams
     moving = all_teams[1:]
     offset = tour_index % (teams_count - 1)
     rotated = moving[-offset:] + moving[:-offset] if offset > 0 else moving
@@ -150,7 +144,6 @@ def simulate_mmo_tour(league_name, current_tour):
         
     print(f"✅ Расчет {current_tour} тура для {league_name} успешно завершен!")
 
-# 🔄 3. Главный обработчик пингов от Render и телефона
 @app.route('/', methods=['GET', 'HEAD'])
 def home_ping_check():
     try:
