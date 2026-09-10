@@ -1,18 +1,21 @@
-import time
+import os
 import random
+import time
 import requests
+from flask import Flask
 
 # 🔐 Токен авторизации, скопированный из Database Secrets в Firebase
 DATABASE_SECRET = "xgEDutCHwe6LmCCoLDzKxjGQ05JZOJvUCmvqgvZa"
 FIREBASE_URL = "https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app"
 
-print("🚀 Автономный REST-сервер успешно запущен и слушает Firebase напрямую...")
+print("🚀 Инициализация REST-сервера с поддержкой портов...")
+
+# 🔌 Создаем Flask-приложение, чтобы Render мгновенно получил открытый порт!
+app = Flask(__name__)
 
 def update_league_table(league_name, team_name, gs, gc, pts):
     clean_name = team_name.strip().replace(".", "").replace("#", "").replace("$", "")
     url = f"{FIREBASE_URL}/leagues_data/{league_name}/table/{clean_name}.json?auth={DATABASE_SECRET}"
-    
-    # Считываем текущие показатели
     try:
         response = requests.get(url)
         snapshot = response.json() if response.status_code == 200 else None
@@ -46,8 +49,6 @@ def update_league_table(league_name, team_name, gs, gc, pts):
 
 def simulate_mmo_tour(league_name, current_tour, clubs_list):
     print(f"🏟️ Начинаю серверный расчет {current_tour} тура для лиги {league_name}...")
-    
-    # Скачиваем тактики
     lineups_url = f"{FIREBASE_URL}/leagues_data/{league_name}/lineups/tour_{current_tour}.json?auth={DATABASE_SECRET}"
     user_lineups = requests.get(lineups_url).json() or {}
     
@@ -58,12 +59,11 @@ def simulate_mmo_tour(league_name, current_tour, clubs_list):
         all_teams = list(table_data.keys())
 
     if not all_teams:
-        print("❌ Ошибка: Список команд вообще не найден.")
+        print("❌ Ошибка: Список команд не найден.")
         return
 
     all_teams = [t.strip() for t in all_teams if t]
-    if len(all_teams) % 2 != 0:
-        all_teams.append("ОТДЫХ")
+    if len(all_teams) % 2 != 0: all_teams.append("ОТДЫХ")
     
     teams_count = len(all_teams)
     rounds_count = (teams_count - 1) * 2
@@ -90,12 +90,9 @@ def simulate_mmo_tour(league_name, current_tour, clubs_list):
             for f_val in current_fixtures.values():
                 if isinstance(f_val, dict):
                     f_home = str(f_val.get('homeTeam', '')).lower().replace(".", "").replace(" ", "")
-                    if f_home == clean_home:
-                        already_played = True
-                        break
+                    if f_home == clean_home: already_played = True; break
         
-        if already_played or home == "ОТДЫХ" or away == "ОТДЫХ":
-            continue
+        if already_played or home == "ОТДЫХ" or away == "ОТДЫХ": continue
 
         home_data = user_lineups.get(home, user_lineups.get(home.replace(".", ""), {})) if isinstance(user_lineups, dict) else {}
         away_data = user_lineups.get(away, user_lineups.get(away.replace(".", ""), {})) if isinstance(user_lineups, dict) else {}
@@ -128,13 +125,13 @@ def simulate_mmo_tour(league_name, current_tour, clubs_list):
             "awayScorers": f"Игрок Б. {score_b} гол(ов)" if score_b > 0 else "Нет голов"
         }
         requests.post(fixtures_url, json=match_data)
-        
-    print(f"✅ Расчет {current_tour} тура для {league_name} успешно завершен!")
+    print(f"✅ Расчет {current_tour} тура успешно завершен!")
 
-# 🔄 Вечный цикл регулярного опроса Firebase (REST-long polling)
-trigger_url = f"{FIREBASE_URL}/sys_trigger.json?auth={DATABASE_SECRET}"
 
-while True:
+# 🔄 3. Главный обработчик: Render пингует эту страницу, порт открывается, и скрипт проверяет Firebase!
+@app.route('/', methods=['GET', 'HEAD'])
+def home_ping_check():
+    trigger_url = f"{FIREBASE_URL}/sys_trigger.json?auth={DATABASE_SECRET}"
     try:
         response = requests.get(trigger_url)
         if response.status_code == 200:
@@ -146,9 +143,15 @@ while True:
                 
                 simulate_mmo_tour(league, tour, clubs_list)
                 
-                # Переводим триггер в FINISHED
+                # Сбрасываем триггер в FINISHED
                 requests.patch(trigger_url, json={'status': 'FINISHED'})
+                return "Матч симулирован сервером!", 200
     except Exception as e:
-        print(f"Ошибка REST-цикла: {e}")
+        print(f"Ошибка проверки триггера: {e}")
         
-    time.sleep(2) # Опрос базы каждые 2 секунды
+    return "Футбольный MMO-сервер активен и слушает порты!", 200
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
