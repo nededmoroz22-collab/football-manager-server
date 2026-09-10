@@ -2,7 +2,6 @@ import time
 import random
 import firebase_admin
 from firebase_admin import credentials, db
-from flask import credentials, db
 
 # 🔐 Токен авторизации, скопированный из Database Secrets в Firebase
 DATABASE_SECRET = "xgEDutCHwe6LmCCoLDzKxjGQ05JZOJvUCmvqgvZa"
@@ -58,7 +57,6 @@ def simulate_mmo_tour(league_name, current_tour, clubs_list):
     lineups_ref = db.reference(f'leagues_data/{league_name}/lineups/tour_{current_tour}')
     user_lineups = lineups_ref.get() or {}
     
-    # Берем список команд, присланный с телефона
     all_teams = list(clubs_list) if clubs_list else []
     
     if not all_teams:
@@ -138,10 +136,8 @@ def simulate_mmo_tour(league_name, current_tour, clubs_list):
         
     print(f"✅ Расчет {current_tour} тура для {league_name} успешно завершен!")
 
-
-# 🔄 2. ОФИЦИАЛЬНЫЙ СЛУШАТЕЛЬ FIREBASE STREAM (Срабатывает сам, без пингов из РФ!)
+# 🔄 ЖИВОЙ СЛУШАТЕЛЬ ТРИГГЕРОВ FIREBASE
 def trigger_listener(event):
-    # Нам интересны только изменения (запись) данных
     if event.data:
         trigger_data = db.reference('sys_trigger').get()
         if trigger_data and trigger_data.get('status') == 'REQUESTED':
@@ -150,9 +146,10 @@ def trigger_listener(event):
             clubs_list = trigger_data.get('clubsList', [])
             
             simulate_mmo_tour(league, tour, clubs_list)
-            
-            # Ставим флаг завершения расчета
             db.reference('sys_trigger').update({'status': 'FINISHED'})
 
-# Запускаем прослушивание ветки sys_trigger вечным живым потоком
 db.reference('sys_trigger').listen(trigger_listener)
+
+# Вечный удерживающий цикл, чтобы фоновый воркер Render не закрывался
+while True:
+    time.sleep(10)
