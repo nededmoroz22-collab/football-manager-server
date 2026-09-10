@@ -5,7 +5,7 @@ from firebase_admin import credentials, db
 from flask import Flask
 
 # 🌐 1. Подключение к твоему Firebase
-cred = credentials.Certificate("serviceAccountKey.txt")
+cred = credentials.Certificate("serviceAccountKey.json")
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app'
 })
