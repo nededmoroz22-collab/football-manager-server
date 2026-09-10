@@ -8,9 +8,8 @@ from flask import Flask
 DATABASE_SECRET = "xgEDutCHwe6LmCCoLDzKxjGQ05JZOJvUCmvqgvZa"
 FIREBASE_URL = "https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app"
 
-print("🚀 Инициализация REST-сервера с поддержкой портов...")
+print("🚀 Запуск всеядного MMO-сервера по токену...")
 
-# 🔌 Создаем Flask-приложение, чтобы Render мгновенно получил открытый порт!
 app = Flask(__name__)
 
 def update_league_table(league_name, team_name, gs, gc, pts):
@@ -128,29 +127,32 @@ def simulate_mmo_tour(league_name, current_tour, clubs_list):
     print(f"✅ Расчет {current_tour} тура успешно завершен!")
 
 
-# 🔄 3. Главный обработчик: Render пингует эту страницу, порт открывается, и скрипт проверяет Firebase!
+# 🔄 🔥 НОВЫЙ БЕЗОПАСНЫЙ ПОТОК: Каждые 3 секунды самостоятельно проверяет базу данных Firebase
+def background_firebase_polling():
+    trigger_url = f"{FIREBASE_URL}/sys_trigger.json?auth={DATABASE_SECRET}"
+    while True:
+        try:
+            response = requests.get(trigger_url)
+            if response.status_code == 200:
+                trigger_data = response.json()
+                if trigger_data and trigger_data.get('status') == 'REQUESTED':
+                    league = trigger_data.get('leagueName', 'La Liga')
+                    tour = trigger_data.get('tourNumber', 1)
+                    clubs_list = trigger_data.get('clubsList', [])
+                    
+                    simulate_mmo_tour(league, tour, clubs_list)
+                    requests.patch(trigger_url, json={'status': 'FINISHED'})
+        except Exception as e:
+            pass
+        time.sleep(3)
+
+# Запускаем фоновый таймер опроса при старте сервера
+threading.Thread(target=background_firebase_polling, daemon=True).start()
+
+
 @app.route('/', methods=['GET', 'HEAD'])
 def home_ping_check():
-    trigger_url = f"{FIREBASE_URL}/sys_trigger.json?auth={DATABASE_SECRET}"
-    try:
-        response = requests.get(trigger_url)
-        if response.status_code == 200:
-            trigger_data = response.json()
-            if trigger_data and trigger_data.get('status') == 'REQUESTED':
-                league = trigger_data.get('leagueName', 'La Liga')
-                tour = trigger_data.get('tourNumber', 1)
-                clubs_list = trigger_data.get('clubsList', [])
-                
-                simulate_mmo_tour(league, tour, clubs_list)
-                
-                # Сбрасываем триггер в FINISHED
-                requests.patch(trigger_url, json={'status': 'FINISHED'})
-                return "Матч симулирован сервером!", 200
-    except Exception as e:
-        print(f"Ошибка проверки триггера: {e}")
-        
     return "Футбольный MMO-сервер активен и слушает порты!", 200
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
