@@ -1,32 +1,27 @@
-import os
+import time
 import random
 import firebase_admin
 from firebase_admin import credentials, db
-from flask import Flask
+from flask import credentials, db
 
 # 🔐 Токен авторизации, скопированный из Database Secrets в Firebase
 DATABASE_SECRET = "xgEDutCHwe6LmCCoLDzKxjGQ05JZOJvUCmvqgvZa"
 DB_URL = "https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app"
 
-# 🔥 УЛЬТРА-ЧИСТЫЙ МЕТОД: Официальный REST-вход по секрету базы данных без файлов и JWT!
 if not firebase_admin._apps:
     try:
-        # Пакуем секрет в каноничный точечный формат, защищенный от ошибок кодировки
         cred = credentials.Certificate({
             "private_key": DATABASE_SECRET,
             "client_email": "admin@://gserviceaccount.com"
         })
         firebase_admin.initialize_app(cred, {'databaseURL': DB_URL})
     except Exception:
-        # Железная страховка, если первый метод не поддерживается старой версией питона
         firebase_admin.initialize_app(None, {
             'databaseURL': DB_URL,
             'options': {'databaseAuthVariableOverride': {'uid': 'admin'}}
         })
 
-print("🚀 Абсолютно универсальный MMO-сервер запущен по токену базы данных!")
-
-app = Flask(__name__)
+print("🚀 Автономный MMO-сервер успешно запущен через живой поток Firebase Stream...")
 
 def update_league_table(league_name, team_name, gs, gc, pts):
     clean_name = team_name.strip().replace(".", "").replace("#", "").replace("$", "")
@@ -57,15 +52,14 @@ def update_league_table(league_name, team_name, gs, gc, pts):
         "gs": goals_s, "gc": goals_c, "wins": wins, "draws": draws, "losses": losses
     })
 
-def simulate_mmo_tour(league_name, current_tour):
+def simulate_mmo_tour(league_name, current_tour, clubs_list):
     print(f"🏟️ Начинаю серверный расчет {current_tour} тура для лиги {league_name}...")
     
     lineups_ref = db.reference(f'leagues_data/{league_name}/lineups/tour_{current_tour}')
     user_lineups = lineups_ref.get() or {}
     
-    trigger_ref = db.reference('sys_trigger')
-    trigger_snap = trigger_ref.get() or {}
-    all_teams = trigger_snap.get('clubsList', [])
+    # Берем список команд, присланный с телефона
+    all_teams = list(clubs_list) if clubs_list else []
     
     if not all_teams:
         table_ref = db.reference(f'leagues_data/{league_name}/table')
@@ -73,7 +67,7 @@ def simulate_mmo_tour(league_name, current_tour):
         all_teams = list(table_data.keys())
 
     if not all_teams:
-        print("❌ Ошибка: Список команд лиги не найден.")
+        print("❌ Ошибка: Список команд вообще не найден.")
         return
 
     all_teams = [t.strip() for t in all_teams if t]
@@ -144,28 +138,21 @@ def simulate_mmo_tour(league_name, current_tour):
         
     print(f"✅ Расчет {current_tour} тура для {league_name} успешно завершен!")
 
-@app.route('/', methods=['GET', 'HEAD'])
-def home_ping_check():
-    try:
-        trigger_ref = db.reference('sys_trigger')
-        trigger_data = trigger_ref.get()
-        
+
+# 🔄 2. ОФИЦИАЛЬНЫЙ СЛУШАТЕЛЬ FIREBASE STREAM (Срабатывает сам, без пингов из РФ!)
+def trigger_listener(event):
+    # Нам интересны только изменения (запись) данных
+    if event.data:
+        trigger_data = db.reference('sys_trigger').get()
         if trigger_data and trigger_data.get('status') == 'REQUESTED':
             league = trigger_data.get('leagueName', 'La Liga')
             tour = trigger_data.get('tourNumber', 1)
+            clubs_list = trigger_data.get('clubsList', [])
             
-            simulate_mmo_tour(league, tour)
-            trigger_ref.update({'status': 'FINISHED'})
-            return "Матч симулирован сервером!", 200
+            simulate_mmo_tour(league, tour, clubs_list)
             
-    except Exception as e:
-        print(f"Ошибка триггера: {e}")
-        try:
+            # Ставим флаг завершения расчета
             db.reference('sys_trigger').update({'status': 'FINISHED'})
-        except Exception: pass
-        
-    return "Футбольный MMO-сервер активен!", 200
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+# Запускаем прослушивание ветки sys_trigger вечным живым потоком
+db.reference('sys_trigger').listen(trigger_listener)
