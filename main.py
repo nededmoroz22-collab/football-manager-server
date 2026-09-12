@@ -65,14 +65,8 @@ def simulate_mmo_tour(trigger_data):
 
     print(f"🏟️ СЕРВЕР: Начинаю расчет {current_tour} тура для лиги '{league_name}'...")
 
-    fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{current_tour}.json?auth={DATABASE_SECRET}"
-    my_match_data = {
-        "homeTeam": my_club, "awayTeam": opponent_club,
-        "homeScore": home_score, "awayScore": away_score,
-        "homeScorers": home_scorers, "awayScorers": away_scorers
-    }
+        fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{current_tour}.json?auth={DATABASE_SECRET}"
     try:
-        requests.post(fixtures_url, json=my_match_data)
         my_pts = 3 if home_score > away_score else (1 if home_score == away_score else 0)
         opp_pts = 3 if away_score > home_score else (1 if home_score == away_score else 0)
         update_league_table(league_name, my_club, home_score, away_score, my_pts)
