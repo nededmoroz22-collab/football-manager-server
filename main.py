@@ -16,7 +16,7 @@ def update_league_table(league_name, team_name, gs, gc, pts):
     if not FIREBASE_URL or not DATABASE_SECRET: return
     clean_league = str(league_name).strip()
     clean_team = str(team_name).strip().replace(".", "").replace("#", "").replace("$", "")
-    
+
     url = f"{FIREBASE_URL}/leagues_data/{clean_league}/table/{clean_team}.json?auth={DATABASE_SECRET}"
     try:
         response = requests.get(url)
@@ -33,16 +33,16 @@ def update_league_table(league_name, team_name, gs, gc, pts):
         wins = snapshot.get('wins', 0)
         draws = snapshot.get('draws', 0)
         losses = snapshot.get('losses', 0)
-        
+
     played += 1
     points += pts
     goals_s += gs
     goals_c += gc
-    
+
     if gs > gc: wins += 1
     elif gs == gc: draws += 1
     else: losses += 1
-    
+
     data = {
         "clubName": str(team_name).strip(), "played": played, "points": points,
         "gs": goals_s, "gc": goals_c, "wins": wins, "draws": draws, "losses": losses
@@ -55,7 +55,7 @@ def simulate_mmo_tour(trigger_data):
     league_name = str(trigger_data.get('leagueName', 'La Liga')).strip()
     current_tour = int(trigger_data.get('tourNumber', 1))
     clubs_list = trigger_data.get('clubsList', [])
-    
+
     my_club = str(trigger_data.get('myClub', '')).strip()
     opponent_club = str(trigger_data.get('opponentClub', '')).strip()
     home_score = int(trigger_data.get('homeScore', 0))
@@ -65,7 +65,7 @@ def simulate_mmo_tour(trigger_data):
 
     print(f"🏟️ СЕРВЕР: Начинаю расчет {current_tour} тура для лиги '{league_name}'...")
 
-fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{current_tour}.json?auth={DATABASE_SECRET}"
+    fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{current_tour}.json?auth={DATABASE_SECRET}"
     try:
         my_pts = 3 if home_score > away_score else (1 if home_score == away_score else 0)
         opp_pts = 3 if away_score > home_score else (1 if home_score == away_score else 0)
@@ -78,7 +78,7 @@ fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{curren
 
     all_teams = [t.strip() for t in all_teams if t]
     if len(all_teams) % 2 != 0: all_teams.append("ОТДЫХ")
-    
+
     teams_count = len(all_teams)
     rounds_count = (teams_count - 1) * 2
     tour_index = (current_tour - 1) % rounds_count
@@ -106,7 +106,7 @@ fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{curren
 
         ovr_a, def_b = random.randint(72, 84), random.randint(72, 82)
         ovr_b, def_a = random.randint(72, 84), random.randint(72, 82)
-        
+
         score_a = score_b = 0
         for _ in range(90):
             if random.randint(0, 100) < 23:
@@ -116,13 +116,13 @@ fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{curren
                 else:
                     prob = max(12, min(35, 18 + (ovr_b - def_a)))
                     if random.randint(0, 100) < prob: score_b += 1
-                        
+
         pts_a = 3 if score_a > score_b else (1 if score_a == score_b else 0)
         pts_b = 3 if score_b > score_a else (1 if score_a == score_b else 0)
-        
+
         update_league_table(league_name, home, score_a, score_b, pts_a)
         update_league_table(league_name, away, score_b, score_a, pts_b)
-        
+
         match_data = {
             "homeTeam": home, "awayTeam": away, "homeScore": score_a, "awayScore": score_b,
             "homeScorers": f"Игрок А. {score_a} гол(ов)" if score_a > 0 else "Нет голов",
@@ -138,7 +138,7 @@ fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{curren
 def home_ping_check():
     if not FIREBASE_URL or not DATABASE_SECRET:
         return "Критическая ошибка: Переменные окружения на Render не настроены!", 500
-        
+
     trigger_url = f"{FIREBASE_URL}/sys_trigger.json?auth={DATABASE_SECRET}"
     try:
         response = requests.get(trigger_url)
@@ -153,7 +153,7 @@ def home_ping_check():
                     return "Расчет завершен!", 200
     except Exception as e:
         print(f"Ошибка проверки триггера: {e}")
-        
+
     return "Футбольный MMO-сервер активен!", 200
 
 if __name__ == "__main__":
