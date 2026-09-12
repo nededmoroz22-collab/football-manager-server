@@ -65,7 +65,7 @@ def simulate_mmo_tour(trigger_data):
 
     print(f"🏟️ СЕРВЕР: Начинаю расчет {current_tour} тура для лиги '{league_name}'...")
 
-        fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{current_tour}.json?auth={DATABASE_SECRET}"
+fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{current_tour}.json?auth={DATABASE_SECRET}"
     try:
         my_pts = 3 if home_score > away_score else (1 if home_score == away_score else 0)
         opp_pts = 3 if away_score > home_score else (1 if home_score == away_score else 0)
