@@ -18,11 +18,17 @@ def update_league_table(league_name, team_name, gs, gc, pts):
     clean_team = str(team_name).strip().replace(".", "").replace("#", "").replace("$", "")
 
     url = f"{FIREBASE_URL}/leagues_data/{clean_league}/table/{clean_team}.json?auth={DATABASE_SECRET}"
-    try:
-        response = requests.get(url)
-        snapshot = response.json() if response.status_code == 200 else None
-    except Exception:
-        snapshot = None
+
+    snapshot = None
+    for attempt in range(3):
+        try:
+            response = requests.get(url, timeout=15)
+            if response.status_code == 200:
+                snapshot = response.json()
+            break
+        except Exception:
+            time.sleep(1)
+            continue
 
     played = points = goals_s = goals_c = wins = draws = losses = 0
     if snapshot and isinstance(snapshot, dict):
@@ -47,7 +53,22 @@ def update_league_table(league_name, team_name, gs, gc, pts):
         "clubName": str(team_name).strip(), "played": played, "points": points,
         "gs": goals_s, "gc": goals_c, "wins": wins, "draws": draws, "losses": losses
     }
-    try: requests.patch(url, json=data)
+
+    for attempt in range(3):
+        try:
+            patch_response = requests.patch(url, json=data, timeout=15)
+            if patch_response.status_code == 200:
+                return
+        except Exception:
+            time.sleep(1)
+            continue
+
+    try:
+        requests.patch(f"{FIREBASE_URL}/debug_info.json?auth={DATABASE_SECRET}", json={
+            "step": "TABLE_UPDATE_FAILED",
+            "team": str(team_name),
+            "league": str(league_name)
+        }, timeout=15)
     except Exception: pass
 
 def simulate_mmo_tour(trigger_data):
