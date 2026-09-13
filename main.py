@@ -136,6 +136,7 @@ def simulate_mmo_tour(trigger_data):
 
 @app.route('/', methods=['GET', 'HEAD'])
 def home_ping_check():
+    print("👋 ПРИВЕТ! Кто-то зашёл на сервер!", flush=True)
     if not FIREBASE_URL or not DATABASE_SECRET:
         return "Критическая ошибка: Переменные окружения на Render не настроены!", 500
 
@@ -154,7 +155,7 @@ def home_ping_check():
     except Exception as e:
         print(f"Ошибка проверки триггера: {e}")
 
-    return "Футбольный MMO-сервер активен!", 200
+    return "ПРОВЕРКА 777 - НОВЫЙ КОД РАБОТАЕТ!", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
