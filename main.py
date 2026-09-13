@@ -117,13 +117,33 @@ def simulate_mmo_tour(trigger_data):
     clean_my_club = my_club.lower().replace(".", "").replace(" ", "")
     clean_opp_club = opponent_club.lower().replace(".", "").replace(" ", "")
 
+    try:
+        requests.patch(debug_url, json={
+            "step": "team_list_check",
+            "all_teams_raw": str(all_teams),
+            "round_teams_raw": str(round_teams)
+        })
+    except Exception: pass
+
     for i in range(teams_count // 2):
         is_second_round = tour_index >= (teams_count - 1)
         home = round_teams[i] if not is_second_round else round_teams[teams_count - 1 - i]
         away = round_teams[teams_count - 1 - i] if not is_second_round else round_teams[i]
 
-        clean_home = home.lower().replace(".", "").replace(" ", "")
-        clean_away = away.lower().replace(".", "").replace(" ", "")
+        try:
+            clean_home = home.lower().replace(".", "").replace(" ", "")
+            clean_away = away.lower().replace(".", "").replace(" ", "")
+        except Exception as loop_err:
+            try:
+                requests.patch(debug_url, json={
+                    "step": "LOOP_ERROR",
+                    "home_value": str(home),
+                    "home_type": str(type(home)),
+                    "away_value": str(away),
+                    "away_type": str(type(away))
+                })
+            except Exception: pass
+            continue
 
         if clean_home == clean_my_club or clean_away == clean_my_club or clean_home == clean_opp_club or clean_away == clean_opp_club:
             continue
