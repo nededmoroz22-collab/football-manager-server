@@ -63,7 +63,18 @@ def simulate_mmo_tour(trigger_data):
     home_scorers = str(trigger_data.get('homeScorers', 'Нет голов')).strip()
     away_scorers = str(trigger_data.get('awayScorers', 'Нет голов')).strip()
 
-    print(f"🏟️ СЕРВЕР: Начинаю расчет {current_tour} тура для лиги '{league_name}'...")
+    print(f"🏟️ СЕРВЕР: Начинаю расчет {current_tour} тура для лиги '{league_name}'...", flush=True)
+
+    debug_url = f"{FIREBASE_URL}/debug_info.json?auth={DATABASE_SECRET}"
+    try:
+        requests.patch(debug_url, json={
+            "last_run": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "league": league_name,
+            "tour": current_tour,
+            "clubs_count": len(clubs_list),
+            "step": "started"
+        })
+    except Exception: pass
 
     fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{current_tour}.json?auth={DATABASE_SECRET}"
     try:
@@ -131,7 +142,18 @@ def simulate_mmo_tour(trigger_data):
         try: requests.post(fixtures_url, json=match_data)
         except Exception: pass
 
-    print(f"✅ Расчет {current_tour} тура для лиги '{league_name}' успешно завершен!")
+    try:
+        requests.patch(debug_url, json={
+            "last_run": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "league": league_name,
+            "tour": current_tour,
+            "clubs_count": len(clubs_list),
+            "step": "finished",
+            "teams_count_final": teams_count
+        })
+    except Exception: pass
+
+    print(f"✅ Расчет {current_tour} тура для лиги '{league_name}' успешно завершен!", flush=True)
 
 
 @app.route('/', methods=['GET', 'HEAD'])
@@ -147,7 +169,15 @@ def home_ping_check():
             trigger_data = response.json()
             if trigger_data and trigger_data.get('status') == 'REQUESTED':
                 try: simulate_mmo_tour(trigger_data)
-                except Exception as inner: print(f"Сбой симуляции: {inner}")
+                except Exception as inner:
+                    print(f"Сбой симуляции: {inner}", flush=True)
+                    try:
+                        requests.patch(f"{FIREBASE_URL}/debug_info.json?auth={DATABASE_SECRET}", json={
+                            "last_run": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "step": "ERROR",
+                            "error_text": str(inner)
+                        })
+                    except Exception: pass
                 finally:
                     # Принудительно гасим триггер в базе по секретному токену
                     requests.patch(trigger_url, json={'status': 'FINISHED'})
