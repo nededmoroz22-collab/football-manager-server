@@ -94,7 +94,7 @@ def simulate_mmo_tour(trigger_data):
     rounds_count = (teams_count - 1) * 2
     tour_index = (current_tour - 1) % rounds_count
 
-    fixed = all_teams
+    fixed = all_teams[0]
     moving = all_teams[1:]
     offset = tour_index % (teams_count - 1)
     rotated = moving[-offset:] + moving[:-offset] if offset > 0 else moving
