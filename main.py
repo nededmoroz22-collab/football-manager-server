@@ -100,6 +100,20 @@ def simulate_mmo_tour(trigger_data):
     rotated = moving[-offset:] + moving[:-offset] if offset > 0 else moving
     round_teams = [fixed] + rotated
 
+    try:
+        requests.patch(debug_url, json={
+            "last_run": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "league": league_name,
+            "tour": current_tour,
+            "clubs_count": len(clubs_list),
+            "step": "before_clean",
+            "my_club_value": str(my_club),
+            "my_club_type": str(type(my_club)),
+            "opponent_club_value": str(opponent_club),
+            "opponent_club_type": str(type(opponent_club))
+        })
+    except Exception: pass
+
     clean_my_club = my_club.lower().replace(".", "").replace(" ", "")
     clean_opp_club = opponent_club.lower().replace(".", "").replace(" ", "")
 
