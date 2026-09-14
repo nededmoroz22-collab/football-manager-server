@@ -58,6 +58,16 @@ def update_league_table(league_name, team_name, gs, gc, pts):
         try:
             patch_response = requests.patch(url, json=data, timeout=15)
             if patch_response.status_code == 200:
+                try:
+                    requests.patch(f"{FIREBASE_URL}/debug_info.json?auth={DATABASE_SECRET}", json={
+                        "step": "table_write_ok",
+                        "team": str(team_name),
+                        "url_used": url,
+                        "snapshot_before": str(snapshot),
+                        "played_before": played - 1,
+                        "played_after": played
+                    }, timeout=15)
+                except Exception: pass
                 return
         except Exception:
             time.sleep(1)
