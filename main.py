@@ -8,7 +8,7 @@ from flask import Flask
 DATABASE_SECRET = "xgEDutCHwe6LmCCoLDzKxjGQ05JZOJvUCmvqgvZa"
 FIREBASE_URL = "https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app"
 
-print(f"🚀 Старт REST-сервера. URL базы: {FIREBASE_URL}")
+print(f"🚀 Старт REST-сервера. URL базы: {FIREBASE_URL}", flush=True)
 
 app = Flask(__name__)
 
@@ -58,28 +58,10 @@ def update_league_table(league_name, team_name, gs, gc, pts):
         try:
             patch_response = requests.patch(url, json=data, timeout=15)
             if patch_response.status_code == 200:
-                try:
-                    requests.patch(f"{FIREBASE_URL}/debug_info.json?auth={DATABASE_SECRET}", json={
-                        "step": "table_write_ok",
-                        "team": str(team_name),
-                        "url_used": url,
-                        "snapshot_before": str(snapshot),
-                        "played_before": played - 1,
-                        "played_after": played
-                    }, timeout=15)
-                except Exception: pass
                 return
         except Exception:
             time.sleep(1)
             continue
-
-    try:
-        requests.patch(f"{FIREBASE_URL}/debug_info.json?auth={DATABASE_SECRET}", json={
-            "step": "TABLE_UPDATE_FAILED",
-            "team": str(team_name),
-            "league": str(league_name)
-        }, timeout=15)
-    except Exception: pass
 
 def simulate_mmo_tour(trigger_data):
     if not FIREBASE_URL or not DATABASE_SECRET: return
@@ -95,17 +77,6 @@ def simulate_mmo_tour(trigger_data):
     away_scorers = str(trigger_data.get('awayScorers', 'Нет голов')).strip()
 
     print(f"🏟️ СЕРВЕР: Начинаю расчет {current_tour} тура для лиги '{league_name}'...", flush=True)
-
-    debug_url = f"{FIREBASE_URL}/debug_info.json?auth={DATABASE_SECRET}"
-    try:
-        requests.patch(debug_url, json={
-            "last_run": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "league": league_name,
-            "tour": current_tour,
-            "clubs_count": len(clubs_list),
-            "step": "started"
-        })
-    except Exception: pass
 
     fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{current_tour}.json?auth={DATABASE_SECRET}"
     try:
@@ -131,30 +102,8 @@ def simulate_mmo_tour(trigger_data):
     rotated = moving[-offset:] + moving[:-offset] if offset > 0 else moving
     round_teams = [fixed] + rotated
 
-    try:
-        requests.patch(debug_url, json={
-            "last_run": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "league": league_name,
-            "tour": current_tour,
-            "clubs_count": len(clubs_list),
-            "step": "before_clean",
-            "my_club_value": str(my_club),
-            "my_club_type": str(type(my_club)),
-            "opponent_club_value": str(opponent_club),
-            "opponent_club_type": str(type(opponent_club))
-        })
-    except Exception: pass
-
     clean_my_club = my_club.lower().replace(".", "").replace(" ", "")
     clean_opp_club = opponent_club.lower().replace(".", "").replace(" ", "")
-
-    try:
-        requests.patch(debug_url, json={
-            "step": "team_list_check",
-            "all_teams_raw": str(all_teams),
-            "round_teams_raw": str(round_teams)
-        })
-    except Exception: pass
 
     for i in range(teams_count // 2):
         is_second_round = tour_index >= (teams_count - 1)
@@ -164,16 +113,7 @@ def simulate_mmo_tour(trigger_data):
         try:
             clean_home = home.lower().replace(".", "").replace(" ", "")
             clean_away = away.lower().replace(".", "").replace(" ", "")
-        except Exception as loop_err:
-            try:
-                requests.patch(debug_url, json={
-                    "step": "LOOP_ERROR",
-                    "home_value": str(home),
-                    "home_type": str(type(home)),
-                    "away_value": str(away),
-                    "away_type": str(type(away))
-                })
-            except Exception: pass
+        except Exception:
             continue
 
         if clean_home == clean_my_club or clean_away == clean_my_club or clean_home == clean_opp_club or clean_away == clean_opp_club:
@@ -207,23 +147,11 @@ def simulate_mmo_tour(trigger_data):
         try: requests.post(fixtures_url, json=match_data)
         except Exception: pass
 
-    try:
-        requests.patch(debug_url, json={
-            "last_run": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "league": league_name,
-            "tour": current_tour,
-            "clubs_count": len(clubs_list),
-            "step": "finished",
-            "teams_count_final": teams_count
-        })
-    except Exception: pass
-
     print(f"✅ Расчет {current_tour} тура для лиги '{league_name}' успешно завершен!", flush=True)
 
 
 @app.route('/', methods=['GET', 'HEAD'])
 def home_ping_check():
-    print("👋 ПРИВЕТ! Кто-то зашёл на сервер!", flush=True)
     if not FIREBASE_URL or not DATABASE_SECRET:
         return "Критическая ошибка: Переменные окружения на Render не настроены!", 500
 
@@ -234,23 +162,15 @@ def home_ping_check():
             trigger_data = response.json()
             if trigger_data and trigger_data.get('status') == 'REQUESTED':
                 try: simulate_mmo_tour(trigger_data)
-                except Exception as inner:
-                    print(f"Сбой симуляции: {inner}", flush=True)
-                    try:
-                        requests.patch(f"{FIREBASE_URL}/debug_info.json?auth={DATABASE_SECRET}", json={
-                            "last_run": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "step": "ERROR",
-                            "error_text": str(inner)
-                        })
-                    except Exception: pass
+                except Exception as inner: print(f"Сбой симуляции: {inner}", flush=True)
                 finally:
                     # Принудительно гасим триггер в базе по секретному токену
                     requests.patch(trigger_url, json={'status': 'FINISHED'})
                     return "Расчет завершен!", 200
     except Exception as e:
-        print(f"Ошибка проверки триггера: {e}")
+        print(f"Ошибка проверки триггера: {e}", flush=True)
 
-    return "ПРОВЕРКА 777 - НОВЫЙ КОД РАБОТАЕТ!", 200
+    return "Футбольный MMO-сервер активен!", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
