@@ -1,10 +1,10 @@
 import os
 import random
 import time
+from datetime import datetime
 import requests
 from flask import Flask
 
-# 🔐 Токен авторизации, скопированный из Database Secrets в Firebase
 DATABASE_SECRET = "xgEDutCHwe6LmCCoLDzKxjGQ05JZOJvUCmvqgvZa"
 FIREBASE_URL = "https://footballmanager-55784-default-rtdb.europe-west1.firebasedatabase.app"
 
@@ -12,23 +12,51 @@ print(f"🚀 Старт REST-сервера. URL базы: {FIREBASE_URL}", flus
 
 app = Flask(__name__)
 
-def update_league_table(league_name, team_name, gs, gc, pts):
-    if not FIREBASE_URL or not DATABASE_SECRET: return
-    clean_league = str(league_name).strip()
-    clean_team = str(team_name).strip().replace(".", "").replace("#", "").replace("$", "")
 
-    url = f"{FIREBASE_URL}/leagues_data/{clean_league}/table/{clean_team}.json?auth={DATABASE_SECRET}"
-
-    snapshot = None
-    for attempt in range(3):
+def fb_get(path):
+    """Читает данные из Firebase по пути."""
+    url = f"{FIREBASE_URL}/{path}.json?auth={DATABASE_SECRET}"
+    for _ in range(3):
         try:
-            response = requests.get(url, timeout=15)
-            if response.status_code == 200:
-                snapshot = response.json()
-            break
+            r = requests.get(url, timeout=15)
+            if r.status_code == 200:
+                return r.json()
+            return None
         except Exception:
             time.sleep(1)
-            continue
+    return None
+
+
+def fb_patch(path, data):
+    """Обновляет данные в Firebase по пути."""
+    url = f"{FIREBASE_URL}/{path}.json?auth={DATABASE_SECRET}"
+    for _ in range(3):
+        try:
+            r = requests.patch(url, json=data, timeout=15)
+            if r.status_code == 200:
+                return True
+        except Exception:
+            time.sleep(1)
+    return False
+
+
+def fb_post(path, data):
+    """Добавляет новую запись в Firebase по пути."""
+    url = f"{FIREBASE_URL}/{path}.json?auth={DATABASE_SECRET}"
+    try:
+        requests.post(url, json=data, timeout=15)
+    except Exception:
+        pass
+
+
+def clean_node(name):
+    return str(name).strip().replace(".", "").replace("#", "").replace("$", "")
+
+
+def update_league_table(league_name, team_name, gs, gc, pts):
+    node = clean_node(team_name)
+    path = f"leagues_data/{str(league_name).strip()}/table/{node}"
+    snapshot = fb_get(path)
 
     played = points = goals_s = goals_c = wins = draws = losses = 0
     if snapshot and isinstance(snapshot, dict):
@@ -45,132 +73,158 @@ def update_league_table(league_name, team_name, gs, gc, pts):
     goals_s += gs
     goals_c += gc
 
-    if gs > gc: wins += 1
-    elif gs == gc: draws += 1
-    else: losses += 1
+    if gs > gc:
+        wins += 1
+    elif gs == gc:
+        draws += 1
+    else:
+        losses += 1
 
-    data = {
+    fb_patch(path, {
         "clubName": str(team_name).strip(), "played": played, "points": points,
         "gs": goals_s, "gc": goals_c, "wins": wins, "draws": draws, "losses": losses
-    }
+    })
 
-    for attempt in range(3):
-        try:
-            patch_response = requests.patch(url, json=data, timeout=15)
-            if patch_response.status_code == 200:
-                return
-        except Exception:
-            time.sleep(1)
+
+def get_lineup(lineups, club_name):
+    """Берёт состав клуба. Если человек не подтвердил — возвращает средние значения бота."""
+    node = clean_node(club_name)
+    if lineups and isinstance(lineups, dict) and node in lineups:
+        data = lineups[node]
+        if isinstance(data, dict):
+            att = int(data.get('attackOvr', 75))
+            dfn = int(data.get('defenseOvr', 75))
+            is_human = bool(data.get('isHuman', False))
+            return att, dfn, is_human
+    # Бот или игрок, не подтвердивший состав
+    return random.randint(72, 82), random.randint(72, 82), False
+
+
+def play_match(att_home, def_home, att_away, def_away):
+    """Симулирует матч на основе силы атаки/защиты обеих команд."""
+    score_h = score_a = 0
+    for _ in range(90):
+        if random.randint(0, 100) < 23:
+            if random.choice([True, False]):
+                prob = max(8, min(40, 18 + (att_home - def_away)))
+                if random.randint(0, 100) < prob:
+                    score_h += 1
+            else:
+                prob = max(8, min(40, 18 + (att_away - def_home)))
+                if random.randint(0, 100) < prob:
+                    score_a += 1
+    return score_h, score_a
+
+
+def build_round_pairs(all_teams, tour_number):
+    """Строит пары матчей для конкретного тура (круговая система)."""
+    teams = [str(t).strip() for t in all_teams if t]
+    if len(teams) % 2 != 0:
+        teams.append("ОТДЫХ")
+
+    count = len(teams)
+    rounds_count = (count - 1) * 2
+    tour_index = (tour_number - 1) % rounds_count
+
+    fixed = teams[0]
+    moving = teams[1:]
+    offset = tour_index % (count - 1)
+    rotated = moving[-offset:] + moving[:-offset] if offset > 0 else moving
+    round_teams = [fixed] + rotated
+
+    pairs = []
+    is_second_round = tour_index >= (count - 1)
+    for i in range(count // 2):
+        home = round_teams[i] if not is_second_round else round_teams[count - 1 - i]
+        away = round_teams[count - 1 - i] if not is_second_round else round_teams[i]
+        if home == "ОТДЫХ" or away == "ОТДЫХ":
             continue
+        pairs.append((home, away))
+    return pairs
 
-def simulate_mmo_tour(trigger_data):
-    if not FIREBASE_URL or not DATABASE_SECRET: return
+
+def run_scheduled_tour(trigger_data):
+    """Рассчитывает весь тур: все пары, с учётом подтверждённых составов."""
     league_name = str(trigger_data.get('leagueName', 'La Liga')).strip()
     current_tour = int(trigger_data.get('tourNumber', 1))
     clubs_list = trigger_data.get('clubsList', [])
 
-    my_club = str(trigger_data.get('myClub', '')).strip()
-    opponent_club = str(trigger_data.get('opponentClub', '')).strip()
-    home_score = int(trigger_data.get('homeScore', 0))
-    away_score = int(trigger_data.get('awayScore', 0))
-    home_scorers = str(trigger_data.get('homeScorers', 'Нет голов')).strip()
-    away_scorers = str(trigger_data.get('awayScorers', 'Нет голов')).strip()
+    if not clubs_list:
+        print("⚠️ Список клубов пуст, расчёт отменён.", flush=True)
+        return
 
-    print(f"🏟️ СЕРВЕР: Начинаю расчет {current_tour} тура для лиги '{league_name}'...", flush=True)
+    print(f"🏟️ СЕРВЕР: Запускаю тур {current_tour} лиги '{league_name}' по расписанию...", flush=True)
 
-    fixtures_url = f"{FIREBASE_URL}/leagues_data/{league_name}/fixtures/tour_{current_tour}.json?auth={DATABASE_SECRET}"
+    # Загружаем все подтверждённые составы этого тура одним запросом
+    lineups = fb_get(f"leagues_data/{league_name}/lineups/tour_{current_tour}")
+
+    pairs = build_round_pairs(clubs_list, current_tour)
+    fixtures_path = f"leagues_data/{league_name}/fixtures/tour_{current_tour}"
+
+    for home, away in pairs:
+        att_h, def_h, human_h = get_lineup(lineups, home)
+        att_a, def_a, human_a = get_lineup(lineups, away)
+
+        score_h, score_a = play_match(att_h, def_h, att_a, def_a)
+
+        pts_h = 3 if score_h > score_a else (1 if score_h == score_a else 0)
+        pts_a = 3 if score_a > score_h else (1 if score_h == score_a else 0)
+
+        update_league_table(league_name, home, score_h, score_a, pts_h)
+        update_league_table(league_name, away, score_a, score_h, pts_a)
+
+        fb_post(fixtures_path, {
+            "homeTeam": home,
+            "awayTeam": away,
+            "homeScore": score_h,
+            "awayScore": score_a,
+            "homeScorers": f"{score_h} гол(ов)" if score_h > 0 else "Нет голов",
+            "awayScorers": f"{score_a} гол(ов)" if score_a > 0 else "Нет голов",
+            "homeIsHuman": human_h,
+            "awayIsHuman": human_a
+        })
+
+    # Тур сыгран: гасим расписание, увеличиваем номер тура
+    fb_patch("sys_trigger", {
+        "status": "FINISHED",
+        "nextTourTime": "",
+        "tourNumber": current_tour + 1,
+        "lastPlayedTour": current_tour
+    })
+
+    print(f"✅ Тур {current_tour} лиги '{league_name}' рассчитан. Матчей: {len(pairs)}", flush=True)
+
+
+def is_time_to_play(next_tour_time):
+    """Проверяет, наступило ли назначенное время тура. Формат: 2026-09-15 20:00"""
+    if not next_tour_time:
+        return False
     try:
-        my_pts = 3 if home_score > away_score else (1 if home_score == away_score else 0)
-        opp_pts = 3 if away_score > home_score else (1 if home_score == away_score else 0)
-        update_league_table(league_name, my_club, home_score, away_score, my_pts)
-        update_league_table(league_name, opponent_club, away_score, home_score, opp_pts)
-    except Exception: pass
-
-    all_teams = list(clubs_list) if clubs_list else []
-    if not all_teams: return
-
-    all_teams = [t.strip() for t in all_teams if t]
-    if len(all_teams) % 2 != 0: all_teams.append("ОТДЫХ")
-
-    teams_count = len(all_teams)
-    rounds_count = (teams_count - 1) * 2
-    tour_index = (current_tour - 1) % rounds_count
-
-    fixed = all_teams[0]
-    moving = all_teams[1:]
-    offset = tour_index % (teams_count - 1)
-    rotated = moving[-offset:] + moving[:-offset] if offset > 0 else moving
-    round_teams = [fixed] + rotated
-
-    clean_my_club = my_club.lower().replace(".", "").replace(" ", "")
-    clean_opp_club = opponent_club.lower().replace(".", "").replace(" ", "")
-
-    for i in range(teams_count // 2):
-        is_second_round = tour_index >= (teams_count - 1)
-        home = round_teams[i] if not is_second_round else round_teams[teams_count - 1 - i]
-        away = round_teams[teams_count - 1 - i] if not is_second_round else round_teams[i]
-
-        try:
-            clean_home = home.lower().replace(".", "").replace(" ", "")
-            clean_away = away.lower().replace(".", "").replace(" ", "")
-        except Exception:
-            continue
-
-        if clean_home == clean_my_club or clean_away == clean_my_club or clean_home == clean_opp_club or clean_away == clean_opp_club:
-            continue
-        if home == "ОТДЫХ" or away == "ОТДЫХ": continue
-
-        ovr_a, def_b = random.randint(72, 84), random.randint(72, 82)
-        ovr_b, def_a = random.randint(72, 84), random.randint(72, 82)
-
-        score_a = score_b = 0
-        for _ in range(90):
-            if random.randint(0, 100) < 23:
-                if random.choice([True, False]):
-                    prob = max(12, min(35, 18 + (ovr_a - def_b)))
-                    if random.randint(0, 100) < prob: score_a += 1
-                else:
-                    prob = max(12, min(35, 18 + (ovr_b - def_a)))
-                    if random.randint(0, 100) < prob: score_b += 1
-
-        pts_a = 3 if score_a > score_b else (1 if score_a == score_b else 0)
-        pts_b = 3 if score_b > score_a else (1 if score_a == score_b else 0)
-
-        update_league_table(league_name, home, score_a, score_b, pts_a)
-        update_league_table(league_name, away, score_b, score_a, pts_b)
-
-        match_data = {
-            "homeTeam": home, "awayTeam": away, "homeScore": score_a, "awayScore": score_b,
-            "homeScorers": f"Игрок А. {score_a} гол(ов)" if score_a > 0 else "Нет голов",
-            "awayScorers": f"Игрок Б. {score_b} гол(ов)" if score_b > 0 else "Нет голов"
-        }
-        try: requests.post(fixtures_url, json=match_data)
-        except Exception: pass
-
-    print(f"✅ Расчет {current_tour} тура для лиги '{league_name}' успешно завершен!", flush=True)
+        target = datetime.strptime(str(next_tour_time).strip(), "%Y-%m-%d %H:%M")
+        return datetime.now() >= target
+    except Exception as e:
+        print(f"⚠️ Не удалось прочитать время тура '{next_tour_time}': {e}", flush=True)
+        return False
 
 
 @app.route('/', methods=['GET', 'HEAD'])
 def home_ping_check():
-    if not FIREBASE_URL or not DATABASE_SECRET:
-        return "Критическая ошибка: Переменные окружения на Render не настроены!", 500
+    trigger_data = fb_get("sys_trigger")
 
-    trigger_url = f"{FIREBASE_URL}/sys_trigger.json?auth={DATABASE_SECRET}"
-    try:
-        response = requests.get(trigger_url)
-        if response.status_code == 200:
-            trigger_data = response.json()
-            if trigger_data and trigger_data.get('status') == 'REQUESTED':
-                try: simulate_mmo_tour(trigger_data)
-                except Exception as inner: print(f"Сбой симуляции: {inner}", flush=True)
-                finally:
-                    # Принудительно гасим триггер в базе по секретному токену
-                    requests.patch(trigger_url, json={'status': 'FINISHED'})
-                    return "Расчет завершен!", 200
-    except Exception as e:
-        print(f"Ошибка проверки триггера: {e}", flush=True)
+    if trigger_data and isinstance(trigger_data, dict):
+        next_time = trigger_data.get('nextTourTime', '')
 
-    return "Футбольный MMO-сервер активен!", 200
+        if is_time_to_play(next_time):
+            try:
+                run_scheduled_tour(trigger_data)
+                return "Тур рассчитан по расписанию!", 200
+            except Exception as e:
+                print(f"Сбой расчёта тура: {e}", flush=True)
+                fb_patch("sys_trigger", {"status": "ERROR", "errorText": str(e)})
+                return f"Ошибка расчёта: {e}", 200
+
+    return "Футбольный MMO-сервер активен. Ждём времени тура.", 200
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
